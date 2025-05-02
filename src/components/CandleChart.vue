@@ -1,19 +1,20 @@
 <template>
-  <div class="chart-container" ref="chartRef" style="height: 500px;"></div>
+  <div class="chart-container" ref="chartRef"></div>
 </template>
 
 <script setup>
-import { onMounted, ref, onBeforeUnmount } from 'vue'
-import { createChart } from 'lightweight-charts'
-import axios from 'axios'
+import { onMounted, ref, onBeforeUnmount } from "vue";
+import { createChart } from "lightweight-charts";
+import axios from "axios";
 
-const chartRef = ref(null)
-const chart = ref(null)
-const series = ref(null)
-const INTERVAL = 60000 // 1-minute candles
-let currentCandle = null
-let ws = null
-
+const chartRef = ref(null);
+const chart = ref(null);
+const series = ref(null);
+const INTERVAL = 60000; // 1-minute candles
+let currentCandle = null;
+let ws = null;
+let countdownInterval = null;
+let currentCountdown = 0;
 const auth_liveData = {
   accountId: "53ddc00e-eccd-4973-9eac-2c84f84de986",
   token:
@@ -28,6 +29,21 @@ const api_live_data = axios.create({
     Accept: "application/json",
   },
 });
+//Coundown
+function startCountdown() {
+  if (countdownInterval) clearInterval(countdownInterval);
+
+  countdownInterval = setInterval(() => {
+    const now = Date.now();
+    const remaining = INTERVAL - (now % INTERVAL);
+    currentCountdown = Math.floor(remaining / 1000);
+    console.log(`Candle countdown: ${currentCountdown} seconds remaining`);
+
+    if (currentCountdown === 0) {
+      console.log("New candle started!");
+    }
+  }, 1000);
+}
 
 // Helper functions
 function getMidPrice(bid, ask) {
@@ -35,7 +51,7 @@ function getMidPrice(bid, ask) {
 }
 
 function getCandleColor(open, close) {
-  return close >= open ? '#089981' : '#F23645';
+  return close >= open ? "#089981" : "#F23645";
 }
 
 async function fetchHistoricalMarketData(symbol, timeframe) {
@@ -54,99 +70,103 @@ onMounted(async () => {
   // Initialize chart
   chart.value = createChart(chartRef.value, {
     layout: {
-      background: { color: '#0E1621' },
-      textColor: '#9AA2B1'
+      background: { color: "#0E1621" },
+      textColor: "#9AA2B1",
     },
     width: chartRef.value.clientWidth,
     height: 500,
     timeScale: {
       timeVisible: true,
       secondsVisible: false,
-      borderColor: '#1E293B',
+      borderColor: "#1E293B",
       fixLeftEdge: true,
     },
     rightPriceScale: {
-      borderColor: '#1E293B',
-      entireTextOnly: true
+      borderColor: "#1E293B",
+      entireTextOnly: true,
     },
     grid: {
-      vertLines: { color: '#1E293B' },
-      horzLines: { color: '#1E293B' }
-    }
+      vertLines: { color: "#1E293B" },
+      horzLines: { color: "#1E293B" },
+    },
   });
 
   series.value = chart.value.addCandlestickSeries({
-    upColor: '#089981',
-    downColor: '#F23645',
-    borderUpColor: '#089981',
-    borderDownColor: '#F23645',
-    wickUpColor: '#089981',
-    wickDownColor: '#F23645',
+    upColor: "#089981",
+    downColor: "#F23645",
+    borderUpColor: "#089981",
+    borderDownColor: "#F23645",
+    wickUpColor: "#089981",
+    wickDownColor: "#F23645",
     priceFormat: {
       minMove: 0.001,
-      precision: 3
+      precision: 3,
     },
     priceLineVisible: true,
     lastValueVisible: true,
-
   });
 
   try {
     // Load historical data
-    const historicalData = await fetchHistoricalMarketData('USDJPY', '1m');
-    
+    const historicalData = await fetchHistoricalMarketData("USDJPY", "1m");
+
     // Process historical data
     const formattedHistory = historicalData
-      .filter(candle => candle.time)
-      .map(candle => {
+      .filter((candle) => candle.time)
+      .map((candle) => {
         const timestamp = Date.parse(candle.time);
         return {
           time: Math.floor(timestamp / 1000),
           open: parseFloat(candle.open),
           high: parseFloat(candle.high),
           low: parseFloat(candle.low),
-          close: parseFloat(candle.close)
+          close: parseFloat(candle.close),
         };
       })
       .sort((a, b) => a.time - b.time);
 
     // Set all historical data
     series.value.setData(formattedHistory);
-    
+
     // Get last 20 candles for initial view
     const last20Candles = formattedHistory.slice(-20);
-    const initialViewStart = last20Candles[0]?.time || Math.floor(Date.now() / 1000 - 20 * 60);
-    const initialViewEnd = last20Candles[last20Candles.length - 1]?.time || Math.floor(Date.now() / 1000);
-    
+    const initialViewStart =
+      last20Candles[0]?.time || Math.floor(Date.now() / 1000 - 20 * 60);
+    const initialViewEnd =
+      last20Candles[last20Candles.length - 1]?.time ||
+      Math.floor(Date.now() / 1000);
+
     // Set initial visible range
     chart.value.timeScale().setVisibleRange({
       from: initialViewStart,
-      to: initialViewEnd
+      to: initialViewEnd,
     });
 
     // Get historical data end time
     const lastHistoricalCandle = formattedHistory[formattedHistory.length - 1];
-    const historicalEndTime = lastHistoricalCandle 
-      ? lastHistoricalCandle.time * 1000 
+    const historicalEndTime = lastHistoricalCandle
+      ? lastHistoricalCandle.time * 1000
       : Date.now();
 
     // Initialize WebSocket connection
-    ws = new WebSocket('wss://marketdata.tradermade.com/feedadv');
+    ws = new WebSocket("wss://marketdata.tradermade.com/feedadv");
 
     ws.onopen = () => {
-      console.log('WebSocket connected');
-      ws.send(JSON.stringify({
-        userKey: 'wsCgVhfz2ZyK5qn8qUYQ',
-        symbol: 'USDJPY'
-      }));
+      console.log("WebSocket connected");
+      ws.send(
+        JSON.stringify({
+          userKey: "wsCgVhfz2ZyK5qn8qUYQ",
+          symbol: "USDJPY",
+        })
+      );
     };
 
     ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
+      console.error("WebSocket error:", error);
     };
 
     ws.onclose = (event) => {
-      console.log('WebSocket closed:', event);
+      console.log("WebSocket closed:", event);
     };
 
     ws.onmessage = (event) => {
@@ -156,15 +176,16 @@ onMounted(async () => {
 
         const price = getMidPrice(tick.bid, tick.ask);
         const timestamp = parseInt(tick.ts);
-        
+
         // Ignore invalid or historical data
         if (isNaN(timestamp)) return;
         if (timestamp <= historicalEndTime) return;
 
         // Calculate candle time aligned with historical data
-        const baseTime = historicalEndTime + INTERVAL > timestamp 
-          ? historicalEndTime 
-          : timestamp;
+        const baseTime =
+          historicalEndTime + INTERVAL > timestamp
+            ? historicalEndTime
+            : timestamp;
         const candleTime = Math.floor(baseTime / INTERVAL) * INTERVAL;
 
         if (!currentCandle || candleTime > currentCandle.originalTime) {
@@ -176,7 +197,7 @@ onMounted(async () => {
               high: currentCandle.high,
               low: currentCandle.low,
               close: currentCandle.close,
-              color: getCandleColor(currentCandle.open, currentCandle.close)
+              color: getCandleColor(currentCandle.open, currentCandle.close),
             });
           }
 
@@ -187,14 +208,11 @@ onMounted(async () => {
             open: price,
             high: price,
             low: price,
-            close: price
+            close: price,
           };
 
-          // Adjust view to show last 20 candles
-          chart.value.timeScale().setVisibleRange({
-            from: currentCandle.time - 19 * 60, // 20 candles * 60 seconds
-            to: currentCandle.time + 60
-          });
+          // Reset countdown when new candle starts
+          startCountdown();
         } else {
           // Update current candle
           currentCandle.high = Math.max(currentCandle.high, price);
@@ -207,29 +225,30 @@ onMounted(async () => {
             high: currentCandle.high,
             low: currentCandle.low,
             close: currentCandle.close,
-            color: getCandleColor(currentCandle.open, currentCandle.close)
+            color: getCandleColor(currentCandle.open, currentCandle.close),
           });
         }
       } catch (err) {
-        console.error('Error processing tick:', err);
+        console.error("Error processing tick:", err);
       }
     };
 
     // Handle window resize
-    const resizeObserver = new ResizeObserver(entries => {
+    const resizeObserver = new ResizeObserver((entries) => {
       chart.value.applyOptions({
         width: entries[0].contentRect.width,
-        height: entries[0].contentRect.height
+        height: entries[0].contentRect.height,
       });
     });
     resizeObserver.observe(chartRef.value);
-
   } catch (error) {
-    console.error('Failed to initialize chart:', error);
+    console.error("Failed to initialize chart:", error);
   }
+  startCountdown();
 });
 
 onBeforeUnmount(() => {
+  if (countdownInterval) clearInterval(countdownInterval);
   if (ws) ws.close();
   if (chart.value) chart.value.remove();
 });
@@ -237,8 +256,9 @@ onBeforeUnmount(() => {
 
 <style>
 .chart-container {
-  width: 100%;
-  background: #0E1621;
+  width: 90vw;
+  height: 75vh;
+  background: #1e1e2f;
   border-radius: 8px;
   overflow: hidden;
 }
